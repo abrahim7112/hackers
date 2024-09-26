@@ -1,0 +1,63 @@
+################################################################################
+# File: CVE-2023-3519-checker.py
+# Version: 1.2
+# Author: Deutsche Telekom CERT
+# Organization: Deutsche Telekom Security GmbH
+# License: GNU General Public License v3.0
+################################################################################
+
+import datetime
+import requests
+import time
+
+requests.packages.urllib3.disable_warnings()
+
+MAX_RETRIES = 3
+
+print("#" * 80)
+print("# CVE-2023-3519-checker.py")
+print("# by Deutsche Telekom CERT")
+print("# Don't use this as your only way of verification!")
+print("#" * 80)
+print("")
+
+PATCHED_VERSIONS = [
+    {"version": "13.0-91.13", "timestamp": "Fri, 07 Jul 2023 15:39:40 GMT"},
+    {"version": "13.1-49.13", "timestamp": "Mon, 10 Jul 2023 17:41:17 GMT"},
+    {"version": "13.1-49.13", "timestamp": "Mon, 10 Jul 2023 18:36:14 GMT"}
+]
+
+def get_last_modified(target_url):
+    for _ in range(MAX_RETRIES):
+        try:
+            resp = requests.get(target_url, verify=False, allow_redirects=True)
+            last_modified = datetime.datetime.strptime(resp.headers["Last-Modified"], "%a, %d %b %Y %H:%M:%S %Z")
+            return resp, last_modified
+        except (KeyError, requests.exceptions.RequestException):
+            continue
+    return None, None
+
+with open("targets.txt", "r") as f:
+    for target in f.readlines():
+        target = f"https://{target.strip()}"
+        resp, last_modified = get_last_modified(target)
+        patched = False
+
+        if resp is not None:
+            for patch in PATCHED_VERSIONS:
+                if last_modified == datetime.datetime.strptime(patch["timestamp"], "%a, %d %b %Y %H:%M:%S %Z"):
+                    patched = True
+            if not patched and last_modified < datetime.datetime.strptime("01 Jul 2023 00:00:00 GMT", "%d %b %Y %H:%M:%S %Z"):
+                patched = "potentially vulnerable (older than 01 Jul 2023)"
+            if not patched and last_modified > datetime.datetime.strptime("18 Jul 2023 13:00:00 GMT", "%d %b %Y %H:%M:%S %Z"):
+                time.sleep(5) # sleep 5 seconds to get a different "Last Modified" timestamp
+                resp_second_try, last_modify_second_try = get_last_modified(target) 
+                if last_modified == last_modify_second_try: # if the timestamps would be different, this could indicate a reverse proxy or something that messes with the timestamp
+                    patched = "Probably patched and customised (modification timestamp is newer than 18 Jul 2023 and not volatile)"
+            elif not patched:
+                patched = "potentially vulnerable (unknown timestamp)"
+        else:
+            patched = "not verifiable"
+            last_modified = "N/A"
+
+        print(f'target: {target} | last modified header: {last_modified} | patched: {patched}')
